@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>AA 图片表格预览</title>
+    <style>
+        body {
+            font-family: system-ui, Arial, sans-serif;
+            background: #f6f7f9;
+        }
+
+        .container {
+            max-width: 960px;
+            margin: 24px auto;
+            padding: 16px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+        }
+
+        h1 {
+            font-size: 18px;
+            margin: 0 0 12px;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+
+        td {
+            border: 1px solid #e5e7eb;
+            padding: 12px;
+            text-align: center;
+            background: #fafafa;
+        }
+
+        img {
+            display: block;
+            margin: 0 auto;
+            height: auto;
+        }
+
+        .note {
+            color: #6b7280;
+            font-size: 12px;
+            margin-top: 8px;
+        }
+        .actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .actions button {
+            padding: 8px 12px;
+            border: 1px solid #e5e7eb;
+            background: #f9fafb;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .actions button:hover {
+            background: #f3f4f6;
+        }
+    </style>
+</head>
+<body>
+<div class="actions">
+    <button id="exportBtn">导出为图片</button>
+</div>
+<div class="container">
+    <h1>AA 图片 - 单行 5 列展示（首列宽度 140，每列递减 10，最小 10）</h1>
+    <table>
+        <tr>
+            <td><img src="aa.png" width="140" alt="aa 140"/></td>
+            <td><img src="aa.png" width="110" alt="aa 110"/></td>
+            <td><img src="aa.png" width="80" alt="aa 80"/></td>
+            <td><img src="aa.png" width="50" alt="aa 50"/></td>
+            <td><img src="aa.png" width="20" alt="aa 20"/></td>
+        </tr>
+        <tr>
+            <td><img src="aa.png" width="110" alt="aa 110"/></td>
+            <td><img src="aa.png" width="80" alt="aa 80"/></td>
+            <td><img src="aa.png" width="140" alt="aa 140"/></td>
+            <td><img src="aa.png" width="20" alt="aa 20"/></td>
+            <td><img src="aa.png" width="50" alt="aa 50"/></td>
+        </tr>
+    </table>
+    <p class="note">如需更多列，可按 140 → 130 → … 递减，宽度不低于 10。</p>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script>
+    document.getElementById('exportBtn').addEventListener('click', async () => {
+        const container = document.querySelector('.container');
+        const canvas = await html2canvas(container, {
+            backgroundColor: null,
+            scale: 2,
+            useCORS: true
+        });
+        const dataURL = canvas.toDataURL('image/png');
+        const link = document.createElement('a');
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        link.href = dataURL;
+        link.download = `container-${timestamp}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    });
+</script>
+</body>
+</html>
