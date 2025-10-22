@@ -1,0 +1,9 @@
+# Force static CRT and help opencv crate choose static libs via vcpkg
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[env]
+OPENCV_STATIC = "1"
+VCPKGRS_TRIPLET = "x64-windows-static"
+VCPKGRS_DYNAMIC = "0"
+VCPKGRS_STATIC = "1"

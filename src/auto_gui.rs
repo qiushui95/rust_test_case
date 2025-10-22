@@ -1,5 +1,5 @@
 use crate::assets::Assets;
-use image::{codecs::png::PngEncoder, ColorType, DynamicImage, GenericImageView};
+use image::{codecs::png::PngEncoder, ColorType, DynamicImage, GenericImageView, ImageEncoder};
 use std::error::Error;
 
 use opencv::{
@@ -104,13 +104,13 @@ impl AutoGui {
         let rgba = img.to_rgba8();
         let mut data = Vec::new();
         let encoder = PngEncoder::new(&mut data);
-        encoder.encode(&rgba, rgba.width(), rgba.height(), ColorType::Rgba8)?;
+        encoder.write_image(&rgba, rgba.width(), rgba.height(), ColorType::Rgba8.into())?;
         Ok(data)
     }
 
     fn decode_png_to_mat_color(bytes: &[u8]) -> Result<core::Mat, Box<dyn Error>> {
-        let bytes_mat = core::Mat::from_slice(bytes)?;
-        let mat = imgcodecs::imdecode(&bytes_mat, imgcodecs::IMREAD_COLOR)?;
+        let buf = core::Vector::<u8>::from_slice(bytes);
+        let mat = imgcodecs::imdecode(&buf, imgcodecs::IMREAD_COLOR)?;
         Ok(mat)
     }
 
@@ -130,13 +130,20 @@ impl AutoGui {
         template_width: Option<u32>,
         result_filter: Option<FindImageResultFilter>,
     ) -> Result<FindImageResults, Box<dyn Error>> {
-        // Load and optionally resize template from embedded assets
+        // Load template directly as Mat and resize via OpenCV if needed
         let Some(file) = Assets::get(assert_path) else {
             return Err(format!("assets加载{}失败", assert_path).into());
         };
-        let template_img = Self::resize_image(image::load_from_memory(&file.data)?, template_width);
-        let template_png = Self::dynamic_image_to_png_bytes(&template_img)?;
-        let template_color = Self::decode_png_to_mat_color(&template_png)?;
+        let mut template_color = Self::decode_png_to_mat_color(&file.data)?;
+        if let Some(tw) = template_width {
+            let cols = template_color.cols();
+            let rows = template_color.rows();
+            let ratio = tw as f64 / cols as f64;
+            let new_h = (rows as f64 * ratio).round() as i32;
+            let mut resized = core::Mat::default();
+            imgproc::resize(&template_color, &mut resized, core::Size::new(tw as i32, new_h), 0.0, 0.0, imgproc::INTER_AREA)?;
+            template_color = resized;
+        }
 
         // Load screenshot from embedded assets
         let Some(screen_file) = Assets::get("screen.png") else {
@@ -147,29 +154,56 @@ impl AutoGui {
         // Apply region crop if provided
         if let Some((left, top, width, height)) = Self::_to_auto_gui_region(region) {
             let rect = Rect::new(left as i32, top as i32, width as i32, height as i32);
-            screen_color = core::Mat::roi(&screen_color, rect)?;
+            let roi = core::Mat::roi(&screen_color, rect)?;
+            screen_color = roi.try_clone()?;
         }
 
-        // Convert both images to grayscale for matching
+        // Convert both images to grayscale and enhance contrast/noise robustness
         let mut screen_gray = core::Mat::default();
         let mut template_gray = core::Mat::default();
-        imgproc::cvtColor(&screen_color, &mut screen_gray, imgproc::COLOR_BGR2GRAY, 0)?;
-        imgproc::cvtColor(&template_color, &mut template_gray, imgproc::COLOR_BGR2GRAY, 0)?;
-
-        // Validate dimensions
-        if template_gray.cols() > screen_gray.cols() || template_gray.rows() > screen_gray.rows() {
-            return Ok(FindImageResults { width: template_gray.cols() as u32, height: template_gray.rows() as u32, list: vec![] });
+        imgproc::cvt_color(&screen_color, &mut screen_gray, imgproc::COLOR_BGR2GRAY, 0, core::AlgorithmHint::ALGO_HINT_DEFAULT)?;
+        imgproc::cvt_color(&template_color, &mut template_gray, imgproc::COLOR_BGR2GRAY, 0, core::AlgorithmHint::ALGO_HINT_DEFAULT)?;
+        // Histogram equalization to reduce illumination variance
+        let mut screen_eq = core::Mat::default();
+        let mut template_eq = core::Mat::default();
+        imgproc::equalize_hist(&screen_gray, &mut screen_eq)?;
+        imgproc::equalize_hist(&template_gray, &mut template_eq)?;
+        // Light Gaussian blur to denoise while preserving structure
+        let mut screen_proc = core::Mat::default();
+        let mut template_proc = core::Mat::default();
+        imgproc::gaussian_blur(&screen_eq, &mut screen_proc, core::Size::new(3, 3), 0.0, 0.0, core::BORDER_DEFAULT, core::AlgorithmHint::ALGO_HINT_DEFAULT)?;
+        imgproc::gaussian_blur(&template_eq, &mut template_proc, core::Size::new(3, 3), 0.0, 0.0, core::BORDER_DEFAULT, core::AlgorithmHint::ALGO_HINT_DEFAULT)?;
+        if self.debug {
+            println!(
+                "screen: {}x{}, template: {}x{}, precision: {}",
+                screen_proc.cols(),
+                screen_proc.rows(),
+                template_proc.cols(),
+                template_proc.rows(),
+                precision
+            );
         }
 
-        // Run template matching
+        // Validate dimensions
+        if template_proc.cols() > screen_proc.cols() || template_proc.rows() > screen_proc.rows() {
+            return Ok(FindImageResults { width: template_proc.cols() as u32, height: template_proc.rows() as u32, list: vec![] });
+        }
+
+        // Run template matching on processed images
         let mut result = core::Mat::default();
         imgproc::match_template(
-            &screen_gray,
-            &template_gray,
+            &screen_proc,
+            &template_proc,
             &mut result,
             imgproc::TM_CCOEFF_NORMED,
             &core::Mat::default(),
         )?;
+        if self.debug {
+            // Save the correlation map visualization
+            let mut result_vis = core::Mat::default();
+            core::normalize(&result, &mut result_vis, 0.0, 255.0, core::NORM_MINMAX, core::CV_8U, &core::Mat::default())?;
+            let _ = imgcodecs::imwrite("target/result.png", &result_vis, &core::Vector::<i32>::new());
+        }
 
         // Collect matches using iterative max suppression
         let mut list: Vec<FindImageResult> = vec![];
@@ -191,7 +225,10 @@ impl AutoGui {
             )?;
 
             if max_val < precision as f64 {
-                break;
+                if self.debug {
+                    println!("max: {:.4} < threshold {}", max_val, precision);
+                }
+                 break;
             }
 
             let left = max_loc.x.max(0) as u32;
@@ -208,14 +245,22 @@ impl AutoGui {
                     top,
                     precision: max_val as f32,
                 });
+                if self.debug {
+                    println!("hit: ({}, {}), precision: {:.4}", left, top, max_val);
+                    // Annotate top match area
+                    let mut annotated = screen_color.try_clone()?;
+                    let rect = Rect::new(max_loc.x, max_loc.y, template_proc.cols(), template_proc.rows());
+                    imgproc::rectangle(&mut annotated, rect, Scalar::new(0.0, 0.0, 255.0, 0.0), 2, imgproc::LINE_8, 0)?;
+                    let _ = imgcodecs::imwrite("target/annotated.png", &annotated, &core::Vector::<i32>::new());
+                }
             }
 
             // Suppress region around current max to find next
             let suppress_rect = Rect::new(
                 (max_loc.x - result_filter.x_delta as i32).max(0),
                 (max_loc.y - result_filter.y_delta as i32).max(0),
-                (template_gray.cols() as u32 + result_filter.x_delta * 2) as i32,
-                (template_gray.rows() as u32 + result_filter.y_delta * 2) as i32,
+                (template_proc.cols() as u32 + result_filter.x_delta * 2) as i32,
+                (template_proc.rows() as u32 + result_filter.y_delta * 2) as i32,
             );
             let suppress_rect = Self::clamp_rect(suppress_rect, result.cols(), result.rows());
             imgproc::rectangle(
@@ -229,8 +274,8 @@ impl AutoGui {
         }
 
         Ok(FindImageResults {
-            width: template_gray.cols() as u32,
-            height: template_gray.rows() as u32,
+            width: template_proc.cols() as u32,
+            height: template_proc.rows() as u32,
             list,
         })
     }

@@ -1,13 +1,10 @@
-use std::thread;
-use rust_test_case::assets::Assets;
-use rust_test_case::auto_gui::{AutoGui, FindImageRegion, FindImageResultFilter};
+use rust_test_case::auto_gui::AutoGui;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    thread::sleep(std::time::Duration::from_secs(1));
 
     // 开启 debug 方便观察匹配过程日志
-    let mut gui = AutoGui::new(false)?;
+    let mut gui = AutoGui::new(true)?;
 
     // 测试函数：传入原图、缩放图，自动读取缩放图宽度作为 template_width
     fn test(
@@ -24,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let results = gui.find_image_on_screen(
             asset_name,
-            0.9,
+            0.75,
             None,
             template_width,
             None,
