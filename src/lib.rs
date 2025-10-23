@@ -1,2 +1,3 @@
-pub mod auto_gui;
 pub mod assets;
+
+pub mod matcher;
