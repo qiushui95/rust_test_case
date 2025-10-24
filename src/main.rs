@@ -11,7 +11,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let matcher = ImageMatcher::new(template_image,true,None)?;
 
-    let results = matcher.start_matching(screen_image, 0.8, None, None)?;
+    let results = matcher.start_matching(screen_image, 0.9, None, None)?;
 
     for result in results.list {
         println!("left: {}, top: {}, threshold: {}", result.left, result.top, result.precision);

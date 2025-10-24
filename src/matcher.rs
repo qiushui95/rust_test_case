@@ -172,6 +172,8 @@ impl ImageMatcher {
         let matcher = Self {
             template: mat,
             use_gray,
+            width: w,
+            height: h,
         };
 
         Ok(matcher)
@@ -199,10 +201,8 @@ impl ImageMatcher {
         x: u32,
         y: u32,
         list: &Vec<ImageMatchResult>,
-        filter: &Option<ImageMatchFilter>,
+        filter: &ImageMatchFilter,
     ) -> bool {
-        let Some(filter) = filter else { return false };
-
         for result in list {
             if filter.need_filter(x, y, result) {
                 return true;
@@ -244,6 +244,8 @@ impl ImageMatcher {
 
         // 遍历结果矩阵，找到所有超过阈值的匹配点
         let result_size = result_mat.size().unwrap_or_default();
+
+        let filter = filter.unwrap_or_else(|| ImageMatchFilter::new(5, 5));
 
         for y in 0..result_size.height as u32 {
             for x in 0..result_size.width as u32 {
